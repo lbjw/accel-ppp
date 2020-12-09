@@ -49,6 +49,7 @@ int conf_req_limit;
 
 static const char *conf_default_realm;
 static int conf_default_realm_len;
+static int conf_strip_realm;
 
 const char *conf_attr_tunnel_type;
 
@@ -281,7 +282,7 @@ int rad_proc_attrs(struct rad_req_t *req)
 	req->rpd->acct_interim_jitter = conf_acct_interim_jitter;
 
 	list_for_each_entry(attr, &req->reply->attrs, entry) {
-		if (attr->vendor && attr->vendor->id == Vendor_Microsoft) {
+		if (attr->vendor && attr->vendor->id == VENDOR_Microsoft) {
 			switch (attr->attr->id) {
 				case MS_Primary_DNS_Server:
 					dns.ses = rpd->ses;
@@ -411,18 +412,32 @@ static int rad_pwdb_check(struct pwdb_t *pwdb, struct ap_session *ses, pwdb_call
 	struct radius_pd_t *rpd = find_pd(ses);
 	char username1[256];
 
-	if (conf_default_realm && !strchr(username, '@')) {
-		int len = strlen(username);
-		if (len + conf_default_realm_len >= 256 - 2) {
-			log_ppp_error("radius: username is too large to append realm\n");
-			return PWDB_DENIED;
-		}
+	if (!rpd) {
+		log_emerg("radius:%s:BUG: rpd not found\n", __func__);
+		abort();
+	}
 
-		memcpy(username1, username, len);
-		username1[len] = '@';
-		memcpy(username1 + len + 1, conf_default_realm, conf_default_realm_len);
-		username1[len + 1 + conf_default_realm_len] = 0;
-		username = username1;
+	if (conf_strip_realm || conf_default_realm) {
+		int len = strchrnul(username, '@') - username;
+		if (conf_strip_realm && username[len]) {
+			if (len > sizeof(username1) - 1) {
+				log_ppp_error("radius: username is too large to strip realm\n");
+				return PWDB_DENIED;
+			}
+			username = memcpy(username1, username, len);
+			username1[len] = '\0';
+		}
+		if (conf_default_realm && username[len] == '\0') {
+			if (len + conf_default_realm_len > sizeof(username1) - 2) {
+				log_ppp_error("radius: username is too large to append realm\n");
+				return PWDB_DENIED;
+			}
+			if (username != username1)
+				username = memcpy(username1, username, len);
+			username1[len++] = '@';
+			memcpy(username1 + len, conf_default_realm, conf_default_realm_len);
+			username1[len + conf_default_realm_len] = '\0';
+		}
 	}
 
 	rpd->auth_ctx = mempool_alloc(auth_ctx_pool);
@@ -472,14 +487,21 @@ static struct ipv4db_item_t *get_ipv4(struct ap_session *ses)
 {
 	struct radius_pd_t *rpd = find_pd(ses);
 
+	if (!rpd)
+		return NULL;
+
 	if (rpd->ipv4_addr.peer_addr)
 		return &rpd->ipv4_addr;
+
 	return NULL;
 }
 
 static struct ipv6db_item_t *get_ipv6(struct ap_session *ses)
 {
 	struct radius_pd_t *rpd = find_pd(ses);
+
+	if (!rpd)
+		return NULL;
 
 	rpd->ipv6_addr.intf_id = 0;
 
@@ -492,6 +514,9 @@ static struct ipv6db_item_t *get_ipv6(struct ap_session *ses)
 static struct ipv6db_prefix_t *get_ipv6_prefix(struct ap_session *ses)
 {
 	struct radius_pd_t *rpd = find_pd(ses);
+
+	if (!rpd)
+		return NULL;
 
 	if (!list_empty(&rpd->ipv6_dp.prefix_list)) {
 		rpd->ipv6_dp_assigned = 1;
@@ -564,7 +589,7 @@ static void ses_acct_start(struct ap_session *ses)
 	if (!conf_accounting)
 		return;
 
-	if (!rpd->authenticated)
+	if (!rpd || !rpd->authenticated)
 		return;
 
 	if (rad_acct_start(rpd)) {
@@ -580,6 +605,11 @@ static void ses_started(struct ap_session *ses)
 	struct radius_pd_t *rpd = find_pd(ses);
 	struct framed_ip6_route *fr6;
 	struct framed_route *fr;
+
+	if (!rpd) {
+		log_emerg("radius:%s:BUG: rpd not found\n", __func__);
+		abort();
+	}
 
 	if (rpd->session_timeout.expire_tv.tv_sec) {
 		rpd->session_timeout.expire = session_timeout;
@@ -619,6 +649,11 @@ static void ses_finishing(struct ap_session *ses)
 	struct framed_ip6_route *fr6;
 	struct framed_route *fr;
 
+	if (!rpd) {
+		log_emerg("radius:%s:BUG: rpd not found\n", __func__);
+		abort();
+	}
+
 	if (rpd->auth_ctx) {
 		rad_server_req_cancel(rpd->auth_ctx->req, 1);
 		rad_req_free(rpd->auth_ctx->req);
@@ -651,6 +686,11 @@ static void ses_finished(struct ap_session *ses)
 	struct ipv6db_addr_t *a;
 	struct framed_route *fr = rpd->fr;
 	struct framed_ip6_route *fr6;
+
+	if (!rpd) {
+		log_emerg("radius:%s:BUG: rpd not found\n", __func__);
+		abort();
+	}
 
 	pthread_rwlock_wrlock(&sessions_lock);
 	pthread_mutex_lock(&rpd->lock);
@@ -747,8 +787,8 @@ struct radius_pd_t *find_pd(struct ap_session *ses)
 			return rpd;
 		}
 	}
-	log_emerg("radius:BUG: rpd not found\n");
-	abort();
+
+	return NULL;
 }
 
 void hold_pd(struct radius_pd_t *rpd)
@@ -988,6 +1028,10 @@ static int load_config(void)
 	conf_default_realm = conf_get_opt("radius", "default-realm");
 	if (conf_default_realm)
 		conf_default_realm_len = strlen(conf_default_realm);
+
+	opt = conf_get_opt("radius", "strip-realm");
+	if (opt && atoi(opt) >= 0)
+		conf_strip_realm = atoi(opt) > 0;
 
 	return 0;
 }

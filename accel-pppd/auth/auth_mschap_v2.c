@@ -105,6 +105,7 @@ static struct auth_data_t* auth_data_init(struct ppp_t *ppp)
 
 	memset(d, 0, sizeof(*d));
 	d->auth.proto = PPP_CHAP;
+	d->auth.len = 1;
 	d->ppp = ppp;
 
 	return &d->auth;
@@ -487,7 +488,7 @@ static void des_encrypt(const uint8_t *input, const uint8_t *key, uint8_t *outpu
 	DES_key_schedule ks;
 
 	memcpy(p_key.buf,key,7);
-	p_key.u64=bswap_64(p_key.u64);
+	p_key.u64 = be64toh(p_key.u64);
 
 	for(i=0;i<8;i++)
 	{

@@ -281,6 +281,9 @@ Specifies lease time in seconds to be sent to dhcp client.
 .BI "renew-time=" n
 Specifies lease renew time (option 58) in seconds to be sent to dhcp client.
 .TP
+.BI "rebind-time=" n
+Specifies lease rebind time (option 59) in seconds to be sent to dhcp client.
+.TP
 .BI "max-lease-time=" n
 Specifies max lease time in seconds, after this time session will be terminated if client won't renew it.
 .TP
@@ -866,14 +869,20 @@ Specifies timeout of accounting interim update.
 .BI "acct-delay-time=" 0|1
 Specifies whether radius client should include Acct-Delay-Time attribute to accounting requests (default 0).
 .TP
-.BI "default-realm=" realm
-Append specified realm to username.
-.TP
 .BI "acct-on=" 0|1
 Specifies whether radius client should send Account-Request with Acct-Status-Type=Accounting-On on startup and Acct-Status-Type=Accounting-Off on shutdown.
 .TP
 .BI "attr-tunnel-type=" name
 Specifies custom attribute name to be used to send tunnel type (as string).
+.TP
+.BI "default-realm=" realm
+Appends specified realm to username if there was no realm already.
+.TP
+.BI "strip-realm=" 0|1
+Strips realm from username, can be used along with
+.B
+default-realm
+option for realm substitution.
 .TP
 .BI "sid-in-auth=0|1"
 Specifies should accel-ppp generate and send Acct-Session-Id on Access-Request packet.
@@ -968,7 +977,7 @@ Path to ip-down script which is executed when session is about to terminate.
 .BI "ip-change=" file
 Path to ip-change script which is executed for RADIUS CoA handling.
 .TP
-.BI "radattr=" prefix
+.BI "radattr-prefix=" prefix
 Prefix of radattr files (for example /var/run/radattr, resulting files will be /var/run/radattr.pppX)
 .TP
 .BI "verbose=" n
